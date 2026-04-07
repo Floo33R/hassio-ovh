@@ -63,7 +63,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     session = async_get_clientsession(hass)
 
-    result = await _update_ovh(session, domain, user, password)
+    current_ip = await _get_current_ip(session)
+    if not current_ip:
+        return False
+
+    result = await _update_ovh(session, domain, user, password, current_ip)
 
     if not result:
         return False
@@ -77,10 +81,25 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
-async def _update_ovh(session, domain, user, password):
+async def _get_current_ip(session):
+    """Get current public IP from ifconfig.co."""
+    try:
+        async with async_timeout.timeout(10):
+            async with session.get("https://ifconfig.co/ip") as resp:
+                ip = (await resp.text()).strip()
+                _LOGGER.info("Got IP from ifconfig.co: %s", ip)
+
+                return ip
+
+    except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+        _LOGGER.error("Failed to get IP from ifconfig.co: %s", err)
+
+        return None
+
+async def _update_ovh(session, domain, user, password, current_ip):
     """Update OVH."""
     try:
-        url = f"https://{user}:{password}@{HOST}?system=dyndns&hostname={domain}"
+        url = f"https://{user}:{password}@{HOST}?system=dyndns&hostname={domain}&myip={current_ip}"
         async with async_timeout.timeout(TIMEOUT):
             resp = await session.get(url)
             body = await resp.text()
